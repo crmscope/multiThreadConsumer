@@ -5,7 +5,6 @@
 *.exe
 *.exe~
 *.dll
-*.so
 *.dylib
 
 # Test binary, built with `go test -c`
@@ -30,3 +29,5 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+vendor/
