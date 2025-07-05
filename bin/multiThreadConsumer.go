@@ -9,19 +9,18 @@
 // To compile: go build -o multiThreadConsumer.so -buildmode=c-shared multiThreadConsumer.go
 //
 // You can find code examples in the examples folder.
-package multiThreadConsumer
+
+package main
 
 import (
 	"C"
+	"context"
 	"encoding/json"
 	"fmt"
-
-	"github.com/segmentio/kafka-go"
-)
-import (
-	"context"
 	"os/exec"
 	"time"
+
+	"github.com/segmentio/kafka-go"
 )
 
 // Structure for json configuration from php.
@@ -29,13 +28,14 @@ type Worker struct {
 	Name      string `json:"name"`
 	Partition int    `json:"partition"`
 	Worker    string `json:"worker"`
+	GroupId   string `json:"group_id"`
 }
 
 // This function is exported to php next jsonStr should be returned from php.
 // jsonStr - is Apache topics configuration.
 //
-//export Consume
-func Consume(jsonStr *C.char) bool {
+//export MultiConsume
+func MultiConsume(kafkaConnect *C.char, commitInterval int16, debugMode bool, jsonStr *C.char) bool {
 
 	var worker []Worker
 
@@ -45,8 +45,9 @@ func Consume(jsonStr *C.char) bool {
 	}
 
 	// Goroutine is the core of the library. There can be many threads.
-	go KafkaConnect(worker[0])
-	go KafkaConnect(worker[1])
+	for i := 0; i < len(worker); i++ {
+		go KafkaConnect(worker[i])
+	}
 
 	// Time to complete the process
 	time.Sleep(1000 * time.Second)

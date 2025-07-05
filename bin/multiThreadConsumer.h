@@ -74,7 +74,11 @@ typedef struct { void *data; GoInt len; GoInt cap; } GoSlice;
 extern "C" {
 #endif
 
-extern GoUint8 Consume(char* jsonStr);
+
+// This function is exported to php next jsonStr should be returned from php.
+// jsonStr - is Apache topics configuration.
+//
+extern GoUint8 MultiConsume(char* kafkaConnect, GoInt16 commitInterval, GoUint8 debugMode, char* jsonStr);
 
 #ifdef __cplusplus
 }
