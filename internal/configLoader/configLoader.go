@@ -24,6 +24,9 @@ type Config struct {
 		Port           int     `yaml:"port"`
 		CommitInterval int     `yaml:"commitInterval"`
 		Log            string  `yaml:"log"`
+		ProcessName    string  `yaml:"processName"`
+		DaemonPidFile  string  `yaml:"daemonPidFile"`
+		DaemonLogFile  string  `yaml:"daemonLogFile"`
 		Topics         []Topic `yaml:"topics"`
 	} `yaml:"kafka"`
 }

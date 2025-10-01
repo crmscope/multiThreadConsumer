@@ -1,0 +1,40 @@
+kafka:
+  # Адрес Kafka
+  host: 172.26.15.2
+  # Порт Kafka
+  port: 29092
+  # Отключаем авто-коммит. (Для ручного упровления)
+  commitInterval: 0
+  # Лог для данных из Kafka
+  log: /var/log/crm/bitrix_exchange.log
+  # Имя процесса, которое будит отображаться в списке процессов OS
+  processName: BitrixExchange
+  # Номер процесса демона
+  daemonPidFile: /var/log/crm/bitrix_exchange_daemon.pid 
+  # Лог для демона
+  daemonLogFile: /var/log/crm/bitrix_exchange_daemon.log 
+  # Массив топиков и соответствующих им  обработчиков.
+  # Каждая секция массива создает один консьюмер в отдельном потоке. 
+  # Для каждого топика может быть запущено неограниченное консьюмеров. 
+  # Но важно придерживаться правило, что консьюмеров должно быть столько 
+  # же сколько партиций в топике.
+  topics:
+    # Имя топика
+  - name: bitrix.esb.opportunity
+    # Имя группы
+    groupId: bitrix.esb.opportunity
+    # Обработчик для топика. Адрес к хендлерам "./../../handlers/"
+    worker: HandlerOpportunity.php
+  # Имя топика
+  - name: bitrix.esb.opportunity
+    # Имя группы
+    groupId: bitrix.esb.opportunity
+    # Обработчик для топика. Адрес к хендлерам "./../../handlers/"
+    worker: HandlerOpportunity.php  
+  - name: bitrix.esb.opportunity
+    # Имя группы
+    groupId: bitrix.esb.opportunity
+    # Обработчик для топика. Адрес к хендлерам "./../../handlers/"
+    worker: HandlerOpportunity.php  
+  
+

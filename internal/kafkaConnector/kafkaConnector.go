@@ -2,95 +2,106 @@ package kafkaConnector
 
 import (
 	"context"
-	"encoding/json"
 	"exchange/kafka/internal/cLoger"
 	"exchange/kafka/internal/configLoader"
 	"exchange/kafka/internal/fileHandler"
 	"fmt"
-	"log"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/segmentio/kafka-go"
 )
 
-/**
- * Consume reads messages from a Kafka topic and processes them using a PHP handler.
- * It commits the message if the handler returns a successful response.
- * If the handler returns an error, it retries after a delay.
- */
-type workerResponse struct {
-	Error        int    `json:"error"`
-	ErrorMessage string `json:"errorMessage"`
-}
+// Консьюмер запускается в отдельном потоке. Потоки между собой никак не связаны — каждый поток
+// представляет собой самостоятельного консьюмера.
+//
+// Принцип работы:
+//
+// Консьюмер считывает данные из заданного топика и передаёт их на обработку PHP-обработчику.
+// Ответ от PHP-обработчика считается успешным, если он равен 0.
+// Любой другой ответ трактуется как ошибка.
+// В случае ошибки указатель Offset не смещается.
+func Consume(cfg *configLoader.Config, topic configLoader.Topic, wg *sync.WaitGroup, stop chan struct{}, done chan struct{}, i int) {
 
-func Consume(cfg *configLoader.Config, topic configLoader.Topic, wg *sync.WaitGroup) {
-
-	defer wg.Done()
-	// Bocker configure
-	r := kafka.NewReader(kafka.ReaderConfig{
-		Brokers:        []string{fmt.Sprintf("%s:%d", cfg.Kafka.Host, cfg.Kafka.Port)},
-		Topic:          topic.TopicName,
-		GroupID:        topic.GroupId,
-		CommitInterval: time.Duration(cfg.Kafka.CommitInterval) * time.Second, // Autocommit disable
-		// SessionTimeout:    100 * time.Second,
-		// HeartbeatInterval: 30 * time.Second,
-		// MaxWait:           100 * time.Second,
-		// RebalanceTimeout:  120 * time.Second,
-		// MaxAttempts:       10,
-		// StartOffset:       kafka.FirstOffset,
-	})
-	defer r.Close()
-
-	// Loger configure
-	logr, err := cLoger.NewFileLogger(cfg.Kafka.Log, "[MultiThreads] ")
-	if err != nil {
-		log.Fatalf("Logger initialization error: %v", err)
-	}
-	defer logr.Close()
-
-	ctx := context.Background()
-
+LOOP:
 	for {
-		// Read message
-		m, err := r.FetchMessage(ctx)
 
-		if err != nil {
-			logr.Error(fmt.Sprint("Error reading message:", err))
-			break
-		}
+		defer wg.Done()
+		// Bocker configure
+		r := kafka.NewReader(kafka.ReaderConfig{
+			Brokers:        []string{fmt.Sprintf("%s:%d", cfg.Kafka.Host, cfg.Kafka.Port)},
+			Topic:          topic.TopicName,
+			GroupID:        topic.GroupId,
+			CommitInterval: time.Duration(cfg.Kafka.CommitInterval) * time.Second, // Autocommit disable
+		})
+		defer r.Close()
 
-		fmt.Printf("offset=%d key=%s value=%s\n",
-			m.Offset, string(m.Key), string(m.Value))
+		// Настройка логера
+		loger := new(cLoger.Logger)
+		loger.Init(fmt.Sprintf("%s.%d.%s", cfg.Kafka.Log, i, "log"), "[Thread] ")
+		defer loger.Close()
+
+		ctx := context.Background()
 
 		for {
-			dataFromBroker := fileHandler.FileRun(m.Value)
+			// Читает сообщение из брокера.
+			m, err := r.FetchMessage(ctx)
 
-			var response workerResponse
-			if err = json.Unmarshal(dataFromBroker, &response); err != nil {
-				logr.Error(fmt.Sprintln("JSON invalid:", err))
-				return
-			}
-
-			fmt.Println("--------------PHP RESPONSE----------------")
-			fmt.Println(response)
-
-			if response.Error == 200 {
-				// Autocommit
-				if err := r.CommitMessages(ctx, m); err != nil {
-					logr.Error(fmt.Sprintln("Error offset:", err))
-					return
-				}
+			if err != nil {
+				// Пытается прочитать сообщение. Если в течении минуты это не удается
+				// сделать возникает паника и ошибка 501 записывается в лог.
+				// ВАЖНО! При отсутствии подключения консьюмер не прекращает свою работу.
+				// При появлении подключения консьюмер автоматически восстановит работу.
+				loger.Error(501, err.Error())
 				break
 			}
+			// Записывает то что удалось прочитать
+			loger.Info(fmt.Sprintf("brokerResponse offset=%d key=%s value=%s\n",
+				m.Offset,
+				string(m.Key),
+				string(m.Value)))
 
-			time.Sleep(1 * time.Second)
+			// Ниже идет циклически обращение к обработчику на php до тех
+			// пор пока тот не вернет код 200 (Данные успешно обработаны).
+			// Для обеспечения сохранности данных код упаковывается в Base64
+			for {
+				handlerResponse := fileHandler.FileRun(m.Value, topic.WorkerName)
+				loger.Info("handlerResponse: " + string(handlerResponse))
+
+				// Тут принцип Linux: при удачной работе программы нечего не выводится.
+				// Если php-обработчик что выводит это расценивается как ошибка.
+				// Для проверки удаляем все пробелы, табуляцию, символы новой строки и перевода коретки.
+				if len(strings.TrimSpace(string(handlerResponse))) == 0 {
+					// Autocommit
+					if err := r.CommitMessages(ctx, m); err != nil {
+						/**
+						* Если не удается закомитить offset то отключаем поток
+						* т.к. похоже с брокером проблема.
+						 */
+						loger.Error(503, err.Error())
+						break LOOP
+					}
+					break
+				}
+
+				//При ошибке на стороне хендлера повторяем
+				// отправку до тех пор, пока не получим код 200
+				time.Sleep(2 * time.Second)
+			}
+		}
+
+		select {
+		case <-stop:
+			break LOOP
+		default:
 		}
 	}
+	done <- struct{}{}
 }
 
+// Пока что продюсер используется только для тестовых целей.
 func Produce(host string, port int, topicName string, messages []kafka.Message) {
-
 	producer := kafka.NewWriter(kafka.WriterConfig{
 		Brokers: []string{fmt.Sprintf("%s:%d", host, port)},
 		Topic:   topicName,
@@ -99,9 +110,9 @@ func Produce(host string, port int, topicName string, messages []kafka.Message) 
 	})
 	defer producer.Close()
 
+	// Отправляем сообщения
 	err := producer.WriteMessages(context.Background(), messages...)
 	if err != nil {
-		log.Fatalf("Error sending messages: %v", err)
+		fmt.Printf("Error sending messages: %v", err)
 	}
-
 }

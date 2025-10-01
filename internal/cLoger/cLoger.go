@@ -1,39 +1,43 @@
 package cLoger
 
 import (
+	"fmt"
 	"log"
 	"os"
 )
 
-type FileLogger struct {
+type Logger struct {
 	logger *log.Logger
 	file   *os.File
 }
 
-// NewFileLogger creates a new instance of the logger that writes to the specified file.
-func NewFileLogger(filePath string, prefix string) (*FileLogger, error) {
-	logFile, err := os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+// Конструктор. Создает логер.
+func (p *Logger) Init(filePath string, prefix string) error {
+	var err error
+
+	p.file, err = os.OpenFile(filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	logger := log.New(logFile, prefix, log.Ldate|log.Ltime|log.Lshortfile)
-	return &FileLogger{
-		logger: logger,
-		file:   logFile,
-	}, nil
+	p.logger = log.New(p.file, prefix, log.Ldate|log.Ltime|log.Lshortfile)
+
+	return nil
 }
 
-// Info writes an informational message
-func (fl *FileLogger) Info(msg string) {
-	fl.logger.Println("INFO: " + msg)
+// Метод для ошибок.
+func (p *Logger) Error(code int32, message string) {
+	p.logger.Println("ERROR [" + fmt.Sprint(code) + "]: " + fmt.Sprintln(message))
 }
 
-// Error writes an error message
-func (fl *FileLogger) Error(msg string) {
-	fl.logger.Println("ERROR: " + msg)
+// Метод для сообщений.
+func (p *Logger) Info(message string) {
+	p.logger.Println("INFO: " + fmt.Sprintln(message))
 }
 
-// Close closes the log file
-func (fl *FileLogger) Close() error {
-	return fl.file.Close()
+// Закрывает соединение с файлом.
+func (p *Logger) Close() {
+	err := p.file.Close()
+	if err != nil {
+		p.Error(599, "Error closing log file")
+	}
 }
